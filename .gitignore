@@ -1,0 +1,38 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+
+# =========================
+# Virtual environments
+# =========================
+venv/
+.venv/
+
+# =========================
+# Environment variables
+# =========================
+.env
+
+# =========================
+# IDE / cache
+# =========================
+.vscode/
+.pytest_cache/
+
+# =========================
+# Raw industrial data
+# =========================
+*.xlsx
+*.xls
+
+# Keep future small public demo CSV if needed
+demo_data/*.xlsx
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
