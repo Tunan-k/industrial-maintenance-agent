@@ -24,6 +24,25 @@
 #     return result
 
 ###### V1.2版本
+
+"""
+功能：
+1. 创建 FastAPI 应用
+2. 初始化模型服务
+3. 定义 HTTP 路由
+
+代码框架：imports
+↓
+app = FastAPI(...)
+↓
+路径配置
+↓
+model_service 初始化
+↓
+@app.post(...)
+↓
+路由函数
+"""
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -46,6 +65,12 @@ from app.services.preprocessing_service import (
 from app.services.model_service import (
     DSMTModelService,
     ModelServiceError,
+)
+
+app = FastAPI(
+    title="Industrial Maintenance Agent",
+    version="1.2.0",
+    description="工业设备智能故障诊断与运维 Agent",
 )
 
 # 路径
