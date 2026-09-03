@@ -36,3 +36,6 @@ demo_data/*.xlsx
 # =========================
 .DS_Store
 Thumbs.db
+
+# Local industrial knowledge manifest
+knowledge/manifests/private/
