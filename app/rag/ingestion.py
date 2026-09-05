@@ -1,21 +1,44 @@
 """
-功能：
-    ① 校验文件 file_path.exists()
-    ② 判断原始格式 PDF / DOCX / PPTX / HTML / TXT / Image
-    ③ Parser TXT → Python读取；其他 → Docling
-    ④ 得到统一文本，normalized_text
-    ⑤ 构造KnowledgeDocument(...)
-    ⑥ 保存 processed artifact
+Industrial Knowledge Document Ingestion
 
-代码详解：
-hashlib：这是 Python 标准库，主要用于：计算文件 SHA256
-calculate_file_sha256(...)作用之一就是给文件做指纹
+当前 V1 目标：
+    将真实工业知识源统一转换为 KnowledgeDocument。
 
+格式策略：
+
+    TXT / Markdown
+        ↓
+    Python lightweight reader
+
+    HTML / DOCX / PPTX
+        ↓
+    Docling
+        ↓
+    DoclingDocument
+
+    Born-digital PDF
+        ↓
+    PyMuPDF native text extraction
+        ↓
+    Page-aware intermediate artifact
+
+最终统一：
+    KnowledgeDocument
+
+为什么 PDF 当前不走 Docling：
+    当前环境无法访问 Docling PDF layout 模型 Hub。
+    即使关闭 OCR、关闭 TableFormer、开启 force_backend_text，
+    Docling 仍然初始化 layout predictor，因此继续阻塞 V1。
+
+扫描版 PDF / OCR：
+    暂不属于当前 V1 阻塞项，后置处理。
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -27,7 +50,7 @@ from app.rag.schemas import (
 
 
 # ============================================================
-# Project paths
+# 1. Project paths
 # ============================================================
 
 PROJECT_ROOT = (
@@ -35,6 +58,7 @@ PROJECT_ROOT = (
     .resolve()
     .parents[2]
 )
+
 
 DEFAULT_PROCESSED_DIR = (
     PROJECT_ROOT
@@ -44,10 +68,11 @@ DEFAULT_PROCESSED_DIR = (
 
 
 # ============================================================
-# Supported source formats
+# 2. Supported source formats
 # ============================================================
 
 SOURCE_FORMAT_MAP = {
+
     ".pdf": SourceFormat.PDF,
 
     ".docx": SourceFormat.DOCX,
@@ -61,6 +86,8 @@ SOURCE_FORMAT_MAP = {
 
     ".md": SourceFormat.MARKDOWN,
 
+    # ingestion 原子层保留图片格式识别能力；
+    # 但当前 Source Scanner V1 不主动摄取独立图片。
     ".png": SourceFormat.IMAGE,
     ".jpg": SourceFormat.IMAGE,
     ".jpeg": SourceFormat.IMAGE,
@@ -72,7 +99,7 @@ SOURCE_FORMAT_MAP = {
 
 
 # ============================================================
-# Errors
+# 3. Errors
 # ============================================================
 
 class IngestionError(RuntimeError):
@@ -80,20 +107,24 @@ class IngestionError(RuntimeError):
     Raised when an industrial knowledge source
     cannot be converted into a KnowledgeDocument.
     """
+    pass
 
 
 # ============================================================
-# Helper functions
+# 4. SHA256
 # ============================================================
 
-#文件内容↓SHA256↓稳定 document_id
 def calculate_file_sha256(
     file_path: Path,
 ) -> str:
     """
-    Calculate SHA256 incrementally.
+    Incrementally calculate file SHA256.
 
-    The whole file is not loaded into memory at once.
+    用途：
+        - 内容指纹
+        - 内容版本标识
+        - 后续 Change Detection
+        - 后续去重 / Upsert 基础
     """
 
     sha256 = hashlib.sha256()
@@ -114,11 +145,15 @@ def calculate_file_sha256(
     return sha256.hexdigest()
 
 
+# ============================================================
+# 5. Detect source format
+# ============================================================
+
 def detect_source_format(
     file_path: Path,
 ) -> SourceFormat:
     """
-    Map a file extension to the project's SourceFormat.
+    Map file suffix to project SourceFormat.
     """
 
     suffix = (
@@ -142,12 +177,16 @@ def detect_source_format(
     return source_format
 
 
+# ============================================================
+# 6. TXT / Markdown reader
+# ============================================================
+
 def read_text_file(
     file_path: Path,
 ) -> str:
     """
-    Read TXT / Markdown using common Chinese
-    and English encodings.
+    Read TXT / Markdown using common
+    Chinese and English encodings.
     """
 
     last_error = None
@@ -177,30 +216,27 @@ def read_text_file(
 
 
 # ============================================================
-# Document Ingestion Service
+# 7. Document Ingestion Service
 # ============================================================
 
 class DocumentIngestionService:
     """
     Convert heterogeneous industrial knowledge files
-    into the project's unified KnowledgeDocument.
+    into unified KnowledgeDocument.
 
-    Pipeline:
+    当前 V1 Parser 路由：
 
-        TXT / Markdown
-              ↓
-        lightweight reader
-              ↓
-        KnowledgeDocument
+        TXT / MD
+            → builtin reader
 
+        PDF
+            → PyMuPDF native text
 
-        PDF / DOCX / PPTX / HTML / Image
-              ↓
-            Docling
-              ↓
-        DoclingDocument
-              ↓
-        KnowledgeDocument
+        HTML / DOCX / PPTX / Image
+            → Docling
+
+    Batch Ingestion 不关心这些 Parser 细节，
+    只重复调用 ingest_file()。
     """
 
     def __init__(
@@ -215,14 +251,22 @@ class DocumentIngestionService:
             processed_dir
         )
 
+        # Unified KnowledgeDocument
         self.document_dir = (
             self.processed_dir
             / "documents"
         )
 
+        # Rich Docling structural artifacts
         self.docling_dir = (
             self.processed_dir
             / "docling"
+        )
+
+        # Born-digital PDF page-aware artifacts
+        self.pdf_pages_dir = (
+            self.processed_dir
+            / "pdf_pages"
         )
 
         self.document_dir.mkdir(
@@ -235,25 +279,32 @@ class DocumentIngestionService:
             exist_ok=True,
         )
 
-        # ----------------------------------------------------
-        # Lazy loading:
-        #
-        # Do not create Docling's DocumentConverter
-        # until a complex document really needs it.
-        # ----------------------------------------------------
+        self.pdf_pages_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
+        # Lazy loading:
+        # HTML / DOCX / PPTX 真正需要时
+        # 才初始化 Docling。
         self._converter = None
 
 
     # ========================================================
-    # Lazy Docling loader
+    # 8. Lazy Docling loader
     # ========================================================
 
     def _get_converter(self):
         """
-        Create Docling DocumentConverter only when needed.
+        Docling is currently used for:
 
-        This keeps TXT / Markdown ingestion lightweight.
+            HTML
+            DOCX
+            PPTX
+            Image
+
+        Born-digital PDF does NOT enter this path
+        in current V1.
         """
 
         if self._converter is None:
@@ -268,7 +319,7 @@ class DocumentIngestionService:
 
                 raise IngestionError(
                     "Docling is required for "
-                    "PDF/DOCX/PPTX/HTML/Image ingestion."
+                    "HTML/DOCX/PPTX/Image ingestion."
                 ) from exc
 
             self._converter = (
@@ -279,9 +330,215 @@ class DocumentIngestionService:
 
 
     # ========================================================
-    # Main public API
+    # 9. Born-digital PDF native text reader
     # ========================================================
-    #这个模块的唯一核心入口
+
+    def _read_born_digital_pdf(
+        self,
+        *,
+        file_path: Path,
+        document_id: str,
+        save_processed: bool,
+    ) -> tuple[
+        str,
+        int,
+        Optional[Path],
+    ]:
+        """
+        Extract text directly from the PDF text layer.
+
+        当前适用范围：
+            - 学术论文
+            - 数字技术手册
+            - 可选择/复制文字的数字 PDF
+
+        当前不负责：
+            - 扫描件
+            - OCR
+            - 图片文字识别
+
+        同时保存 page-aware JSON：
+
+            page_number
+            text
+
+        为下一阶段 Chunking 保留页级信息。
+        """
+
+        try:
+
+            import fitz
+
+        except ImportError as exc:
+
+            raise IngestionError(
+                "PyMuPDF is required for "
+                "born-digital PDF ingestion. "
+                "Install it with: pip install PyMuPDF"
+            ) from exc
+
+
+        pages: list[
+            dict[str, Any]
+        ] = []
+
+        text_parts: list[str] = []
+
+        pdf_pages_path: Optional[
+            Path
+        ] = None
+
+
+        try:
+
+            pdf_document = (
+                fitz.open(
+                    file_path
+                )
+            )
+
+        except Exception as exc:
+
+            raise IngestionError(
+                "PyMuPDF failed to open PDF "
+                f"{file_path.name}: {exc}"
+            ) from exc
+
+
+        try:
+
+            page_count = len(
+                pdf_document
+            )
+
+
+            for page_index in range(
+                page_count
+            ):
+
+                page = (
+                    pdf_document[
+                        page_index
+                    ]
+                )
+
+
+                # sort=True:
+                # 尽量依据页面坐标重建阅读顺序。
+                #
+                # 对复杂双栏页面不保证完美，
+                # 因此后面必须做 PDF Pilot 内容验收。
+                page_text = (
+                    page
+                    .get_text(
+                        "text",
+                        sort=True,
+                    )
+                    .strip()
+                )
+
+
+                page_number = (
+                    page_index + 1
+                )
+
+
+                pages.append(
+                    {
+                        "page_number": (
+                            page_number
+                        ),
+
+                        "text": (
+                            page_text
+                        ),
+                    }
+                )
+
+
+                if page_text:
+
+                    text_parts.append(
+                        (
+                            f"\n\n"
+                            f"<!-- page:{page_number} -->"
+                            f"\n\n"
+                            f"{page_text}"
+                        )
+                    )
+
+
+            normalized_text = (
+                "\n".join(
+                    text_parts
+                )
+                .strip()
+            )
+
+
+            if save_processed:
+
+                pdf_pages_path = (
+                    self.pdf_pages_dir
+                    / (
+                        f"{document_id}"
+                        ".pages.json"
+                    )
+                )
+
+
+                page_artifact = {
+
+                    "document_id": (
+                        document_id
+                    ),
+
+                    "source_name": (
+                        file_path.name
+                    ),
+
+                    "parser": (
+                        "pymupdf_native_text"
+                    ),
+
+                    "page_count": (
+                        page_count
+                    ),
+
+                    "pages": (
+                        pages
+                    ),
+                }
+
+
+                pdf_pages_path.write_text(
+
+                    json.dumps(
+                        page_artifact,
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+
+                    encoding="utf-8",
+                )
+
+
+            return (
+                normalized_text,
+                page_count,
+                pdf_pages_path,
+            )
+
+
+        finally:
+
+            pdf_document.close()
+
+
+    # ========================================================
+    # 10. Main public API
+    # ========================================================
+
     def ingest_file(
         self,
         file_path: Union[
@@ -307,11 +564,19 @@ class DocumentIngestionService:
         """
         Ingest exactly one industrial knowledge file.
 
-        This method is deliberately kept as the stable
-        single-file atomic operation.
+        Stable atomic operation:
 
-        Future BatchIngestion will call this method repeatedly.
+            one source file
+                ↓
+            parser
+                ↓
+            normalized text
+                ↓
+            KnowledgeDocument
+
+        Batch Ingestion repeatedly calls this method.
         """
+
 
         # ----------------------------------------------------
         # 1. Normalize path
@@ -345,9 +610,9 @@ class DocumentIngestionService:
 
 
         # ----------------------------------------------------
-        # 3. Detect file format
+        # 3. Detect source format
         # ----------------------------------------------------
-        #判断 PDF / DOCX / TXT / HTML……
+
         source_format = (
             detect_source_format(
                 file_path
@@ -356,7 +621,7 @@ class DocumentIngestionService:
 
 
         # ----------------------------------------------------
-        # 4. Build stable document identity
+        # 4. Stable processed-document identity
         # ----------------------------------------------------
 
         content_hash = (
@@ -371,7 +636,7 @@ class DocumentIngestionService:
 
 
         # ----------------------------------------------------
-        # 5. Parse content
+        # 5. Parser output placeholders
         # ----------------------------------------------------
 
         parser_name = None
@@ -380,11 +645,13 @@ class DocumentIngestionService:
 
         docling_json_path = None
 
+        pdf_pages_path = None
+
 
         # ====================================================
-        # Lightweight text path
+        # A. TXT / Markdown
         # ====================================================
-        #表示简单格式走轻量路线。
+
         if source_format in {
             SourceFormat.TXT,
             SourceFormat.MARKDOWN,
@@ -402,9 +669,42 @@ class DocumentIngestionService:
 
 
         # ====================================================
-        # Docling path
+        # B. Born-digital PDF
         # ====================================================
-        #否则，复杂格式交给 Docling
+
+        elif (
+            source_format
+            == SourceFormat.PDF
+        ):
+
+            (
+                normalized_text,
+                page_count,
+                pdf_pages_path,
+            ) = self._read_born_digital_pdf(
+
+                file_path=(
+                    file_path
+                ),
+
+                document_id=(
+                    document_id
+                ),
+
+                save_processed=(
+                    save_processed
+                ),
+            )
+
+            parser_name = (
+                "pymupdf_native_text"
+            )
+
+
+        # ====================================================
+        # C. Docling formats
+        # ====================================================
+
         else:
 
             try:
@@ -425,10 +725,7 @@ class DocumentIngestionService:
 
 
                 # --------------------------------------------
-                # Export a readable representation.
-                #
-                # Markdown keeps headings / lists / tables
-                # better than plain text for later chunking.
+                # Readable Markdown representation
                 # --------------------------------------------
 
                 normalized_text = (
@@ -436,11 +733,13 @@ class DocumentIngestionService:
                     .export_to_markdown()
                 )
 
-                parser_name = "docling"
+                parser_name = (
+                    "docling"
+                )
 
 
                 # --------------------------------------------
-                # Page count if available.
+                # Page count if available
                 # --------------------------------------------
 
                 try:
@@ -463,9 +762,7 @@ class DocumentIngestionService:
 
 
                 # --------------------------------------------
-                # Preserve Docling's richer structural JSON.
-                #
-                # Later Structure-aware Chunking can use it.
+                # Preserve Docling structure
                 # --------------------------------------------
 
                 if save_processed:
@@ -481,7 +778,7 @@ class DocumentIngestionService:
                             ".docling.json"
                         )
                     )
-                    #保存 Docling 的完整结构，留给下一阶段 Structure-aware Chunking
+
                     docling_document.save_as_json(
                         docling_json_path,
                         image_mode=(
@@ -491,7 +788,9 @@ class DocumentIngestionService:
 
 
             except IngestionError:
+
                 raise
+
 
             except Exception as exc:
 
@@ -512,6 +811,18 @@ class DocumentIngestionService:
 
         if not normalized_text:
 
+            if (
+                source_format
+                == SourceFormat.PDF
+            ):
+
+                raise IngestionError(
+                    "No usable embedded text "
+                    f"was extracted from {file_path.name}. "
+                    "This PDF may be scanned/image-based. "
+                    "OCR is not enabled in current V1."
+                )
+
             raise IngestionError(
                 "No usable text was extracted "
                 f"from {file_path.name}."
@@ -519,10 +830,11 @@ class DocumentIngestionService:
 
 
         # ----------------------------------------------------
-        # 7. Merge technical + custom metadata
+        # 7. Technical metadata
         # ----------------------------------------------------
 
         metadata = {
+
             "content_sha256": (
                 content_hash
             ),
@@ -542,19 +854,56 @@ class DocumentIngestionService:
             ),
 
             "docling_json_path": (
-                str(docling_json_path)
+                str(
+                    docling_json_path
+                )
                 if docling_json_path
+                else None
+            ),
+
+            "pdf_pages_path": (
+                str(
+                    pdf_pages_path
+                )
+                if pdf_pages_path
                 else None
             ),
 
             "text_representation": (
                 "markdown"
-                if parser_name == "docling"
-                else "plain_text"
+                if parser_name
+                == "docling"
+
+                else (
+                    "page_text"
+                    if parser_name
+                    == "pymupdf_native_text"
+
+                    else
+                    "plain_text"
+                )
+            ),
+
+            "pdf_ocr_enabled": (
+                False
+                if source_format
+                == SourceFormat.PDF
+                else None
+            ),
+
+            "pdf_parser_strategy": (
+                "born_digital_native_text"
+                if source_format
+                == SourceFormat.PDF
+                else None
             ),
         }
 
-        #给未来 Manifest / Batch Ingestion 留扩展口
+
+        # ----------------------------------------------------
+        # 8. Merge Manifest / Batch metadata
+        # ----------------------------------------------------
+
         if extra_metadata:
 
             metadata.update(
@@ -563,10 +912,11 @@ class DocumentIngestionService:
 
 
         # ----------------------------------------------------
-        # 8. Build project's unified KnowledgeDocument
+        # 9. Build unified KnowledgeDocument
         # ----------------------------------------------------
-        #最重要的一步，把外部解析器结果正式转换为我们项目内部的数据合同
+
         document = KnowledgeDocument(
+
             document_id=(
                 document_id
             ),
@@ -627,7 +977,7 @@ class DocumentIngestionService:
 
 
         # ----------------------------------------------------
-        # 9. Persist project's unified representation
+        # 10. Persist unified KnowledgeDocument
         # ----------------------------------------------------
 
         if save_processed:
@@ -649,7 +999,7 @@ class DocumentIngestionService:
 
 
         # ----------------------------------------------------
-        # 10. Return unified document
+        # 11. Return
         # ----------------------------------------------------
 
         return document

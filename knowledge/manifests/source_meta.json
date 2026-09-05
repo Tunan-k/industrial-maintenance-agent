@@ -1,0 +1,46 @@
+{
+  "Working on Mud Pumps - IADC.org.html": {
+    "title": "Working on Mud Pumps",
+    "source": "International Association of Drilling Contractors (IADC)",
+    "source_url": "https://iadc.org/safety-meeting-topics/working-on-mud-pumps/",
+    "equipment_type": "drilling_pump",
+    "equipment_model": null,
+    "fault_type": null,
+    "document_type": "industry_safety_guidance",
+    "knowledge_scope": "equipment_type",
+    "authority_level": "industry_association",
+    "language": "en",
+    "version": "1",
+    "review_status": "approved"
+  },
+
+  "sensors-26-04917.pdf": {
+    "title": "Research on Vibration Signal Processing and Fault Diagnosis Algorithms for High-Pressure Quintuplex Pumps",
+    "source": "Sensors",
+    "source_url": "https://doi.org/10.3390/s26154917",
+    "equipment_type": "drilling_pump",
+    "equipment_model": null,
+    "fault_type": null,
+    "document_type": "research_paper",
+    "knowledge_scope": "equipment_type",
+    "authority_level": "research_reference",
+    "language": "en",
+    "version": "1",
+    "review_status": "approved"
+  },
+
+  "钻井泵.pptx": {
+    "title": "钻井泵项目知识说明",
+    "source": "user_project_material",
+    "source_url": null,
+    "equipment_type": "drilling_pump",
+    "equipment_model": null,
+    "fault_type": null,
+    "document_type": "internal_project_note",
+    "knowledge_scope": "equipment_type",
+    "authority_level": "internal_reference",
+    "language": "zh",
+    "version": "1",
+    "review_status": "approved"
+  }
+}

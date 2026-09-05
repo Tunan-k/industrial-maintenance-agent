@@ -1,21 +1,25 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import uuid
 
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.rag.ingestion import (
-    SOURCE_FORMAT_MAP,
-    calculate_file_sha256,
+from .manifest import (
+    ManifestEntry,
+    review_manifest,
+    save_manifest,
 )
 
 
-# ============================================================
-# Project paths
-# ============================================================
+# =========================================================
+# 1. Project paths
+# =========================================================
 
 PROJECT_ROOT = (
     Path(__file__)
@@ -23,484 +27,509 @@ PROJECT_ROOT = (
     .parents[2]
 )
 
-DEFAULT_MANIFEST_DIR = (
+
+DEFAULT_RAW_ROOT = (
+    PROJECT_ROOT
+    / "knowledge"
+    / "raw"
+)
+
+
+MANIFEST_DIR = (
     PROJECT_ROOT
     / "knowledge"
     / "manifests"
-    / "private"
-)
-
-DEFAULT_MANIFEST_PATH = (
-    DEFAULT_MANIFEST_DIR
-    / "knowledge_sources.local.jsonl"
 )
 
 
-# ============================================================
-# Resource-folder rules
-# ============================================================
+SOURCE_META_PATH = (
+    MANIFEST_DIR
+    / "source_meta.json"
+)
 
-IGNORED_DIR_NAMES = {
-    "__pycache__",
-    ".git",
-    ".pytest_cache",
-    ".vscode",
+
+MANIFEST_PATH = (
+    MANIFEST_DIR
+    / "knowledge_sources.jsonl"
+)
+
+
+# =========================================================
+# 2. V1 supported formats
+# =========================================================
+
+SUPPORTED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".md",
+    ".txt",
+    ".html",
+    ".htm",
 }
 
 
-def is_web_resource_folder(
-    directory: Path,
-) -> bool:
-    """
-    Browser 'Save webpage complete' often generates:
+# =========================================================
+# 3. SHA256
+# =========================================================
 
-        page.html
-        page_files/
+def sha256_file(
+    path: Path,
+    block_size: int = 1024 * 1024,
+) -> str:
 
-    Files inside *_files are webpage dependencies and
-    should not be treated as standalone knowledge sources.
-    """
+    digest = hashlib.sha256()
 
-    name = (
-        directory
-        .name
-        .lower()
+    with path.open("rb") as file:
+
+        while True:
+
+            chunk = file.read(
+                block_size
+            )
+
+            if not chunk:
+                break
+
+            digest.update(
+                chunk
+            )
+
+    return digest.hexdigest()
+
+
+# =========================================================
+# 4. Stable source identity
+# =========================================================
+
+def stable_document_id(
+    relative_path: str,
+) -> str:
+
+    uid = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        relative_path,
     )
 
-    return name.endswith(
-        "_files"
+    return (
+        f"doc_{uid.hex[:16]}"
     )
 
 
-def should_ignore_directory(
-    directory: Path,
-) -> bool:
+# =========================================================
+# 5. Load manually reviewed metadata
+# =========================================================
 
-    if directory.name in IGNORED_DIR_NAMES:
-        return True
+def load_source_meta(
+    meta_path: Path,
+) -> dict[str, dict[str, Any]]:
 
-    if is_web_resource_folder(
-        directory
+    if not meta_path.exists():
+
+        return {}
+
+    raw_text = (
+        meta_path
+        .read_text(
+            encoding="utf-8"
+        )
+    )
+
+    data = json.loads(
+        raw_text
+    )
+
+    if not isinstance(
+        data,
+        dict,
     ):
-        return True
+
+        raise ValueError(
+            "source_meta.json "
+            "最外层必须是 JSON object"
+        )
+
+    normalized: dict[
+        str,
+        dict[str, Any],
+    ] = {}
+
+    for key, value in data.items():
+
+        if not isinstance(
+            value,
+            dict,
+        ):
+
+            raise ValueError(
+                f"{key!r} 对应值 "
+                "必须是 JSON object"
+            )
+
+        # Windows backslash
+        # → internal POSIX-style relative path
+        normalized_key = (
+            str(key)
+            .replace(
+                "\\",
+                "/",
+            )
+        )
+
+        normalized[
+            normalized_key
+        ] = value
+
+    return normalized
+
+
+# =========================================================
+# 6. Skip browser resources / hidden files
+# =========================================================
+
+def should_skip(
+    path: Path,
+    raw_root: Path,
+) -> bool:
+
+    relative = (
+        path
+        .relative_to(
+            raw_root
+        )
+    )
+
+    for part in relative.parts:
+
+        if part.startswith("."):
+            return True
+
+        if part.endswith(
+            "_files"
+        ):
+            return True
+
+        if part == "__pycache__":
+            return True
 
     return False
 
 
-# ============================================================
-# Source record
-# ============================================================
+# =========================================================
+# 7. Scan knowledge sources
+# =========================================================
 
-def build_source_record(
-    file_path: Path,
-    source_root: Path,
-) -> dict[str, Any]:
-    """
-    Build one manifest record.
+def scan_sources(
+    raw_root: Path,
+) -> list[ManifestEntry]:
 
-    Scanner only records objective / technical metadata.
-    Business metadata remains pending for later review.
-    """
-
-    suffix = (
-        file_path
-        .suffix
-        .lower()
-    )
-
-    source_format = (
-        SOURCE_FORMAT_MAP[
-            suffix
-        ]
-    )
-
-    content_hash = (
-        calculate_file_sha256(
-            file_path
-        )
-    )
-
-    relative_path = (
-        file_path
-        .relative_to(
-            source_root
-        )
-    )
-
-    return {
-        # -------------------------------
-        # Stable identity
-        # -------------------------------
-
-        "source_id": (
-            f"src_{content_hash[:16]}"
-        ),
-
-        # -------------------------------
-        # Technical metadata
-        # -------------------------------
-
-        "source_path": str(
-            file_path
-        ),
-
-        "relative_path": str(
-            relative_path
-        ),
-
-        "source_name": (
-            file_path.name
-        ),
-
-        "source_format": (
-            source_format.value
-        ),
-
-        "file_size_bytes": (
-            file_path
-            .stat()
-            .st_size
-        ),
-
-        "content_sha256": (
-            content_hash
-        ),
-
-        # -------------------------------
-        # Processing state
-        # -------------------------------
-
-        "enabled": True,
-
-        "review_status": (
-            "pending"
-        ),
-
-        "ingestion_status": (
-            "not_started"
-        ),
-
-        "ingestion_error": None,
-
-        # -------------------------------
-        # Business metadata
-        #
-        # Do NOT guess these only
-        # from filename.
-        # -------------------------------
-
-        "source_type": (
-            "other"
-        ),
-
-        "equipment_type": None,
-
-        "manufacturer": None,
-
-        "equipment_model": None,
-
-        "revision": None,
-
-        "authority_level": 3,
-
-        "language": None,
-
-        # -------------------------------
-        # Audit information
-        # -------------------------------
-
-        "scanned_at": (
-            datetime.now()
-            .isoformat(
-                timespec="seconds"
-            )
-        ),
-    }
-
-
-# ============================================================
-# Directory scanner
-# ============================================================
-#只负责到底有哪些知识源
-def scan_source_directory(
-    source_root: str | Path,
-) -> list[dict[str, Any]]:
-    """
-    Recursively discover supported industrial
-    knowledge files.
-
-    The function DOES NOT parse document content.
-    """
-
-    source_root = (
-        Path(source_root)
+    raw_root = (
+        raw_root
         .expanduser()
         .resolve()
     )
 
-    if not source_root.exists():
+    if not raw_root.exists():
 
         raise FileNotFoundError(
-            f"Source directory does not exist: "
-            f"{source_root}"
+            "知识源目录不存在："
+            f"{raw_root}"
         )
 
-    if not source_root.is_dir():
+    if not raw_root.is_dir():
 
         raise NotADirectoryError(
-            f"Source root is not a directory: "
-            f"{source_root}"
+            "知识源路径不是目录："
+            f"{raw_root}"
         )
 
+    source_meta = load_source_meta(
+        SOURCE_META_PATH
+    )
 
-    records: list[
-        dict[str, Any]
+    entries: list[
+        ManifestEntry
     ] = []
 
+    files = sorted(
+        path
+        for path
+        in raw_root.rglob("*")
+        if path.is_file()
+    )
 
-    for file_path in (
-        source_root
-        .rglob("*")
-    ):
+    for path in files:
 
-        # --------------------------------
-        # Skip directories themselves.
-        # --------------------------------
-
-        if not file_path.is_file():
-            continue
-
-
-        # --------------------------------
-        # Ignore anything inside
-        # webpage *_files directories.
-        # --------------------------------
-
-        relative_parts = (
-            file_path
-            .relative_to(
-                source_root
-            )
-            .parts[:-1]
-        )
-
-        ignore_file = False
-
-        for part in relative_parts:
-
-            directory = Path(
-                part
-            )
-
-            if should_ignore_directory(
-                directory
-            ):
-
-                ignore_file = True
-                break
-
-
-        if ignore_file:
-            continue
-
-
-        # --------------------------------
-        # Skip unsupported extensions.
-        # --------------------------------
-
-        suffix = (
-            file_path
-            .suffix
-            .lower()
-        )
-        # 过滤
-        if suffix not in (
-            SOURCE_FORMAT_MAP
+        if should_skip(
+            path,
+            raw_root,
         ):
             continue
 
-
-        # --------------------------------
-        # Add candidate.
-        # --------------------------------
-
-        record = build_source_record(
-            file_path=file_path,
-            source_root=source_root,
-        )
-
-        records.append(
-            record
-        )
-
-
-    # Stable ordering improves reproducibility.
-    records.sort(
-        key=lambda item: (
-            item["relative_path"]
+        suffix = (
+            path
+            .suffix
             .lower()
         )
-    )
 
-    return records
+        if (
+            suffix
+            not in SUPPORTED_EXTENSIONS
+        ):
+            continue
 
-
-# ============================================================
-# Manifest persistence
-# ============================================================
-
-def save_manifest(
-    records: list[dict[str, Any]],
-    manifest_path: str | Path = (
-        DEFAULT_MANIFEST_PATH
-    ),
-) -> Path:
-
-    manifest_path = (
-        Path(manifest_path)
-        .expanduser()
-        .resolve()
-    )
-
-    manifest_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-
-    with manifest_path.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-
-        for record in records:
-
-            file.write(
-                json.dumps(
-                    record,
-                    ensure_ascii=False,
-                )
+        relative_path = (
+            path
+            .relative_to(
+                raw_root
             )
+            .as_posix()
+        )
 
-            file.write("\n")
+        stat = path.stat()
+
+        override = (
+            source_meta
+            .get(
+                relative_path,
+                {},
+            )
+        )
+
+        entry = ManifestEntry(
+
+            # ---------------------------------------------
+            # Automatically observed file facts
+            # ---------------------------------------------
+
+            document_id=(
+                stable_document_id(
+                    relative_path
+                )
+            ),
+
+            relative_path=(
+                relative_path
+            ),
+
+            file_type=(
+                suffix
+                .lstrip(".")
+            ),
+
+            file_size=(
+                stat.st_size
+            ),
+
+            file_sha256=(
+                sha256_file(
+                    path
+                )
+            ),
+
+            updated_at=(
+                datetime
+                .fromtimestamp(
+                    stat.st_mtime,
+                    tz=timezone.utc,
+                )
+            ),
 
 
-    return manifest_path
+            # ---------------------------------------------
+            # Human-reviewed industrial metadata
+            # ---------------------------------------------
+
+            title=(
+                override.get(
+                    "title"
+                )
+            ),
+
+            source=(
+                override.get(
+                    "source",
+                    "unknown",
+                )
+            ),
+
+            source_url=(
+                override.get(
+                    "source_url"
+                )
+            ),
+
+            equipment_type=(
+                override.get(
+                    "equipment_type",
+                    "unknown",
+                )
+            ),
+
+            equipment_model=(
+                override.get(
+                    "equipment_model"
+                )
+            ),
+
+            fault_type=(
+                override.get(
+                    "fault_type"
+                )
+            ),
+
+            document_type=(
+                override.get(
+                    "document_type",
+                    "unknown",
+                )
+            ),
+
+            knowledge_scope=(
+                override.get(
+                    "knowledge_scope",
+                    "unknown",
+                )
+            ),
+
+            authority_level=(
+                override.get(
+                    "authority_level",
+                    "unknown",
+                )
+            ),
+
+            language=(
+                override.get(
+                    "language",
+                    "unknown",
+                )
+            ),
+
+            version=(
+                override.get(
+                    "version",
+                    "1",
+                )
+            ),
+
+            review_status=(
+                override.get(
+                    "review_status",
+                    "pending",
+                )
+            ),
+        )
+
+        entries.append(
+            entry
+        )
+
+    return entries
 
 
-# ============================================================
-# CLI
-# ============================================================
+# =========================================================
+# 8. CLI
+# =========================================================
 
-def main():
+def main() -> None:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Scan industrial knowledge files "
-            "and generate a local JSONL manifest."
+            "扫描工业知识源并生成 "
+            "Knowledge Manifest"
         )
     )
 
     parser.add_argument(
-        "source_root",
+        "--raw-root",
+
+        type=Path,
+
+        default=DEFAULT_RAW_ROOT,
+
         help=(
-            "Root directory containing "
-            "industrial knowledge files."
+            "原始工业知识源目录。"
+            "默认使用 project/knowledge/raw"
         ),
     )
 
     parser.add_argument(
         "--output",
-        default=str(
-            DEFAULT_MANIFEST_PATH
-        ),
+
+        type=Path,
+
+        default=MANIFEST_PATH,
+
         help=(
-            "Output JSONL manifest path."
+            "Manifest JSONL 输出路径"
         ),
     )
-
 
     args = parser.parse_args()
 
-
-    records = (
-        scan_source_directory(
-            args.source_root
-        )
+    raw_root = (
+        args.raw_root
+        .expanduser()
+        .resolve()
     )
-
 
     output_path = (
-        save_manifest(
-            records=records,
-            manifest_path=args.output,
+        args.output
+        .expanduser()
+        .resolve()
+    )
+
+    print(
+        "[scan] source_root="
+        f"{raw_root}"
+    )
+
+    entries = scan_sources(
+        raw_root=raw_root
+    )
+
+    save_manifest(
+        entries,
+        output_path,
+    )
+
+    format_counts = Counter(
+        entry.file_type
+        for entry in entries
+    )
+
+    print(
+        "[scan] found="
+        f"{len(entries)}"
+    )
+
+    print(
+        "[scan] formats="
+        + json.dumps(
+            dict(
+                format_counts
+            ),
+            ensure_ascii=False,
         )
     )
 
-
-    print(
-        "===================================="
+    report = review_manifest(
+        entries
     )
 
     print(
-        "Industrial Knowledge Source Scanner"
-    )
-
-    print(
-        "===================================="
-    )
-
-    print(
-        f"Source root : "
-        f"{Path(args.source_root).resolve()}"
-    )
-
-    print(
-        f"Candidates  : {len(records)}"
-    )
-
-    print(
-        f"Manifest    : {output_path}"
-    )
-
-
-    format_counts: dict[
-        str,
-        int,
-    ] = {}
-
-
-    for record in records:
-
-        fmt = record[
-            "source_format"
-        ]
-
-        format_counts[
-            fmt
-        ] = (
-            format_counts
-            .get(
-                fmt,
-                0,
-            )
-            + 1
+        json.dumps(
+            report,
+            ensure_ascii=False,
+            indent=2,
         )
-
-
-    print(
-        "\nFormat summary:"
     )
 
-    for fmt, count in (
-        sorted(
-            format_counts.items()
-        )
-    ):
-
-        print(
-            f"  {fmt:<10} {count}"
-        )
+    print(
+        "\nmanifest -> "
+        f"{output_path}"
+    )
 
 
 if __name__ == "__main__":

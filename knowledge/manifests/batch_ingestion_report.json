@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-09-04T08:25:36.145900+00:00",
+  "raw_root": "F:\\git-demo-file\\file",
+  "manifest_path": "F:\\git-demo-file\\industrial-maintenance-agent\\knowledge\\manifests\\knowledge_sources.jsonl",
+  "total_manifest_documents": 18,
+  "total_ready": 3,
+  "success": 3,
+  "failed": 0,
+  "skipped": 15,
+  "results": [
+    {
+      "relative_path": "sensors-26-04917.pdf",
+      "status": "success",
+      "manifest_document_id": "doc_cc9bc520f2865eb1",
+      "processed_document_id": "doc_32ad0cb5ad61b855",
+      "title": "Research on Vibration Signal Processing and Fault Diagnosis Algorithms for High-Pressure Quintuplex Pumps",
+      "source_format": "pdf",
+      "language": "en"
+    },
+    {
+      "relative_path": "Working on Mud Pumps - IADC.org.html",
+      "status": "success",
+      "manifest_document_id": "doc_68cddf39c1155c8e",
+      "processed_document_id": "doc_2f6f063c16686c80",
+      "title": "Working on Mud Pumps",
+      "source_format": "html",
+      "language": "en"
+    },
+    {
+      "relative_path": "钻井泵.pptx",
+      "status": "success",
+      "manifest_document_id": "doc_81206ad69fab5606",
+      "processed_document_id": "doc_6a0580144710c81f",
+      "title": "钻井泵项目知识说明",
+      "source_format": "pptx",
+      "language": "zh"
+    }
+  ]
+}
