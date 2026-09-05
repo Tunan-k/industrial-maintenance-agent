@@ -1,0 +1,29 @@
+{
+  "before": {
+    "top1_hit_rate": 0.25,
+    "top3_relevance_rate": 0.1388888888888889,
+    "ppt_retrieval_ratio": 0.7777777777777778
+  },
+  "after": {
+    "top1_hit_rate": 0.25,
+    "top3_relevance_rate": 0.1388888888888889,
+    "ppt_retrieval_ratio": 0.7777777777777778
+  },
+  "same_rankings": true,
+  "max_score_delta": 0.0,
+  "queries_and_labels_unchanged": true,
+  "only_chunk_source_type_changed": true,
+  "embedding_and_retriever_code_unchanged": true,
+  "input_chunks": 63,
+  "indexed_chunks": 46,
+  "excluded_chunks": 17,
+  "reopened_qdrant_payload_counts": {
+    "research_paper": 36,
+    "industry_safety_guidance": 7,
+    "internal_project_note": 3
+  },
+  "qdrant_path": "F:\\git-demo-file\\industrial-maintenance-agent\\knowledge\\vector_store\\phase3_7b",
+  "collection": "semantic_validation",
+  "baseline": "reports/phase3_6_retrieval.json",
+  "after_report": "reports/phase3_7b_retrieval.json"
+}

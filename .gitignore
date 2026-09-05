@@ -41,3 +41,6 @@ Thumbs.db
 knowledge/manifests/private/
 # Local Phase 2 vector database
 knowledge/vector_store/
+
+# Local retrieval embedding weights and validation temporary files
+artifacts/embedding/

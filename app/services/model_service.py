@@ -29,7 +29,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from app.models.dsmt1dcnn import DSMT1DCNN10
+from app.models.diagnosis.dsmt1dcnn import DSMT1DCNN10
 
 
 class ModelServiceError(RuntimeError):

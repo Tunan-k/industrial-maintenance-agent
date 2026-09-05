@@ -230,3 +230,16 @@ def test_real_diagnosis_tool():
         2: "suction_moderate",
         3: "suction_severe",
     }
+    from app.tools.diagnosis_tool import DiagnosisEvidence
+    from uuid import UUID
+    evidence = [DiagnosisEvidence.model_validate(e) for e in result["evidence"]]
+    assert len(evidence) == 3
+    assert len({e.trace_id for e in evidence}) == 1
+    UUID(evidence[0].trace_id)
+    for item, cylinder in zip(evidence, result["cylinders"]):
+        assert item.cylinder_id == cylinder["cylinder_id"]
+        assert item.fault_type == cylinder["fault_type"]
+        assert item.confidence == cylinder["model_score"]
+        assert item.model_name == result["model_name"]
+        assert item.model_version.startswith("sha256:")
+        assert item.latency_ms > 0 and item.warnings

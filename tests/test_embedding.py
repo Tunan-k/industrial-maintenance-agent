@@ -87,6 +87,7 @@ def test_overlong_input_is_not_silently_truncated(provider):
 
 
 def test_config_from_environment(monkeypatch):
+    monkeypatch.delenv("EMBEDDING_MODEL_PATH", raising=False)
     monkeypatch.setenv("EMBEDDING_MODEL", "some/local/model")
     monkeypatch.setenv("EMBEDDING_REVISION", "revision-a")
     monkeypatch.setenv("EMBEDDING_BATCH_SIZE", "2")
@@ -98,6 +99,12 @@ def test_config_from_environment(monkeypatch):
     monkeypatch.delenv("EMBEDDING_MODEL")
     with pytest.raises(ValueError):
         EmbeddingConfig.from_env()
+
+
+def test_model_path_environment_takes_precedence(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_MODEL_PATH", "local/trained-model")
+    monkeypatch.setenv("EMBEDDING_MODEL", "legacy-model")
+    assert EmbeddingConfig.from_env().model_name_or_path == "local/trained-model"
 
 
 def test_load_failure_is_explicit(monkeypatch):

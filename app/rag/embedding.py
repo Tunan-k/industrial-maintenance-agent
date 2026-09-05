@@ -37,7 +37,8 @@ class EmbeddingConfig:
         # Environment variables must be exported by the caller; no .env secrets
         # are read or logged by this module.
         return cls(
-            model_name_or_path=os.environ.get("EMBEDDING_MODEL", ""),
+            model_name_or_path=(os.environ.get("EMBEDDING_MODEL_PATH")
+                                or os.environ.get("EMBEDDING_MODEL", "")),
             revision=os.environ.get("EMBEDDING_REVISION") or None,
             device=os.environ.get("EMBEDDING_DEVICE", "cpu"),
             batch_size=int(os.environ.get("EMBEDDING_BATCH_SIZE", "16")),

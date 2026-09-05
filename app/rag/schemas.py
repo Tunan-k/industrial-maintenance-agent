@@ -41,6 +41,9 @@ class SourceType(str, Enum):
     PARTS_MANUAL = "parts_manual"
     TECHNICAL_REPORT = "technical_report"
     RESEARCH_PAPER = "research_paper"
+    INDUSTRY_SAFETY_GUIDANCE = "industry_safety_guidance"
+    INTERNAL_PROJECT_NOTE = "internal_project_note"
+    PPT = "ppt"
     OTHER = "other"
 
 

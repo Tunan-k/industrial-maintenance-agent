@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from app.rag.source_metadata import resolve_source_type
 
 from app.rag.ingestion import (
     DocumentIngestionService,
@@ -266,6 +267,7 @@ def ingest_manifest_entry(
             title=(
                 entry.title
             ),
+            source_type=resolve_source_type(entry.document_type, source_file.suffix),
 
             equipment_type=(
                 entry.equipment_type
