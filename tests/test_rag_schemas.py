@@ -9,7 +9,6 @@ from app.rag.schemas import (
     KnowledgeChunk,
     KnowledgeDocument,
     SourceFormat,
-    SourceLocation,
     SourceType,
 )
 
@@ -39,57 +38,26 @@ def test_knowledge_document():
 
 
 def test_knowledge_chunk():
-
     chunk = KnowledgeChunk(
         chunk_id="chunk001",
         document_id="doc001",
-
-        text=(
-            "Inspect the suction valve "
-            "and valve seat."
-        ),
-
-        title="Suction valve inspection",
-
-        source_name="pump_manual.pdf",
-
-        source_format=SourceFormat.PDF,
-
-        source_type=SourceType.OEM_MANUAL,
-
-        location=SourceLocation(
-            section="5.3",
-            page=87,
-        ),
-
-        equipment_type="drilling_pump",
-
-        components=[
-            "suction_valve"
-        ],
-
-        fault_types=[
-            "suction_severe"
-        ],
-
-        severities=[
-            "severe"
-        ],
-
-        action_types=[
-            ActionType.INSPECTION
-        ],
-
-        authority_level=5,
+        text="Inspect the suction valve and valve seat.",
+        metadata={
+            "title": "Suction valve inspection",
+            "source_name": "pump_manual.pdf",
+            "source_format": SourceFormat.PDF,
+            "source_type": SourceType.OEM_MANUAL,
+            "source_uri": "manuals/pump_manual.pdf",
+            "section": "5.3",
+            "page": 87,
+            "equipment_type": "drilling_pump",
+            "components": ["suction_valve"],
+            "fault_types": ["suction_severe"],
+            "severities": ["severe"],
+            "action_types": [ActionType.INSPECTION],
+            "authority_level": 5,
+        },
     )
-
-    assert chunk.components == [
-        "suction_valve"
-    ]
-
-    assert chunk.location.page == 87
-
-    assert (
-        chunk.fault_types[0]
-        == "suction_severe"
-    )
+    assert chunk.metadata.components == ["suction_valve"]
+    assert chunk.metadata.page == 87
+    assert chunk.metadata.fault_types == ["suction_severe"]

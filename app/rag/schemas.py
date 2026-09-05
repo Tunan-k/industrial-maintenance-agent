@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ============================================================
@@ -221,115 +221,66 @@ class KnowledgeDocument(BaseModel):
 # ============================================================
 
 
-class KnowledgeChunk(BaseModel):
+class ChunkMetadata(BaseModel):
+    """Shared provenance and indexing metadata for every source format.
+
+    Nullable required fields distinguish unknown provenance from omitted keys.
+    Numeric authority is inherited from KnowledgeDocument; authority_label is
+    preserved separately without inventing a numeric ranking for source labels.
     """
-    Smallest industrial knowledge unit used for embedding,
-    vector storage and retrieval.
-    """
 
-    chunk_id: str = Field(
-        min_length=1,
-        description=(
-            "Stable unique identifier of the chunk."
-        ),
-    )
+    model_config = ConfigDict(extra="forbid")
 
-    document_id: str = Field(
-        min_length=1,
-        description=(
-            "ID of the source KnowledgeDocument."
-        ),
-    )
+    title: str = Field(min_length=1)
+    source_type: SourceType
+    source_uri: Optional[str]
+    equipment_type: Optional[str]
+    authority_level: int = Field(ge=1, le=5)
+    page: Optional[int] = Field(ge=1)
+    section: Optional[str]
 
-    text: str = Field(
-        min_length=1,
-        description=(
-            "Actual text used for embedding and retrieval."
-        ),
-    )
-
-    title: Optional[str] = Field(
-        default=None,
-        description=(
-            "Chunk title or contextual heading."
-        ),
-    )
-
-    source_name: str = Field(
-        min_length=1,
-        description="Original source name.",
-    )
-
+    source_name: str = Field(min_length=1)
     source_format: SourceFormat
-
-    source_type: SourceType = Field(
-        default=SourceType.OTHER,
-    )
-
-    location: SourceLocation = Field(
-        default_factory=SourceLocation,
-    )
-
-    content_type: ContentType = Field(
-        default=ContentType.TEXT,
-    )
-
-    equipment_type: Optional[str] = Field(
-        default=None,
-        description=(
-            "Equipment category associated with this knowledge."
-        ),
-    )
-
-    components: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Related equipment components, "
-            "e.g. suction_valve."
-        ),
-    )
-
-    fault_types: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Related model fault labels, "
-            "e.g. suction_severe."
-        ),
-    )
-
-    severities: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Related fault severities such as "
-            "light, moderate or severe."
-        ),
-    )
-
-    action_types: list[ActionType] = Field(
-        default_factory=list,
-        description=(
-            "Maintenance actions supported by the chunk."
-        ),
-    )
-
-    authority_level: int = Field(
-        default=3,
-        ge=1,
-        le=5,
-        description=(
-            "Authority of this knowledge source."
-        ),
-    )
-
+    language: str = "zh"
+    equipment_model: Optional[str] = None
     revision: Optional[str] = None
+    slide: Optional[int] = Field(default=None, ge=1)
+    manifest_document_id: str = ""
+    chunk_index: int = Field(default=0, ge=0)
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+    document_type: Optional[str] = None
+    knowledge_scope: Optional[str] = None
+    authority_label: Optional[str] = None
+    relative_path: Optional[str] = None
+    fault_type: Optional[str] = None
+    content_type: ContentType = ContentType.TEXT
+    components: list[str] = Field(default_factory=list)
+    fault_types: list[str] = Field(default_factory=list)
+    severities: list[str] = Field(default_factory=list)
+    action_types: list[ActionType] = Field(default_factory=list)
+    chunking_strategy: Optional[str] = None
+    char_count: Optional[int] = Field(default=None, ge=0)
+    estimated_tokens: Optional[int] = Field(default=None, ge=0)
 
-    language: str = Field(
-        default="zh",
-    )
 
-    metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description=(
-            "Extra metadata not represented by standard fields."
-        ),
-    )
+class KnowledgeChunk(BaseModel):
+    """Canonical serialized chunk contract; provenance lives only in metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_id: str = Field(min_length=1)
+    document_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    metadata: ChunkMetadata
+
+
+class Evidence(BaseModel):
+    """Retrieved source evidence; score is similarity, not fault probability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    score: float = Field(allow_inf_nan=False)
+    metadata: ChunkMetadata

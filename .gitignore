@@ -39,3 +39,5 @@ Thumbs.db
 
 # Local industrial knowledge manifest
 knowledge/manifests/private/
+# Local Phase 2 vector database
+knowledge/vector_store/

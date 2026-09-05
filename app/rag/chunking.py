@@ -10,9 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from pydantic import BaseModel
-
 from app.rag.manifest import load_manifest
+from app.rag.schemas import ChunkMetadata, KnowledgeChunk
 
 
 # ============================================================
@@ -76,88 +75,6 @@ class ChunkingError(RuntimeError):
 # ============================================================
 # 3. Unified KnowledgeChunk
 # ============================================================
-
-class KnowledgeChunk(BaseModel):
-    """
-    Chunk 之后的统一数据合同。
-
-    后面的：
-
-        Embedding
-        Qdrant
-        Retriever
-
-    都只应该依赖 KnowledgeChunk，
-    不需要再知道底层来自 PDF / HTML / PPTX。
-    """
-
-    # ---------- identity ----------
-
-    chunk_id: str
-
-    # processed KnowledgeDocument ID
-    document_id: str
-
-    # Source Scanner / Manifest ID
-    manifest_document_id: str
-
-    chunk_index: int
-
-
-    # ---------- chunk content ----------
-
-    text: str
-
-    title: str
-
-    section: Optional[str] = None
-
-    # PDF 当前可以精确追踪页码。
-    # HTML/PPTX 第一版允许 None。
-    page: Optional[int] = None
-
-
-    # ---------- source ----------
-
-    source_name: str
-
-    source_format: str
-
-    language: str
-
-
-    # ---------- industrial metadata ----------
-
-    equipment_type: Optional[str] = None
-
-    equipment_model: Optional[str] = None
-
-    fault_type: Optional[str] = None
-
-
-    # ---------- provenance ----------
-
-    source: Optional[str] = None
-
-    source_url: Optional[str] = None
-
-    document_type: Optional[str] = None
-
-    knowledge_scope: Optional[str] = None
-
-    authority_level: Optional[str] = None
-
-    relative_path: Optional[str] = None
-
-
-    # ---------- chunk technical metadata ----------
-
-    chunking_strategy: str
-
-    char_count: int
-
-    estimated_tokens: int
-
 
 # ============================================================
 # 4. Chunking config
@@ -1162,183 +1079,42 @@ def make_chunk(
     page: Optional[int] = None,
 ) -> KnowledgeChunk:
 
-    metadata = (
-        document.get(
-            "metadata"
-        )
-        or {}
-    )
-
-
+    metadata = document.get("metadata") or {}
     return KnowledgeChunk(
-
         chunk_id=stable_chunk_id(
-
-            document_id=(
-                document[
-                    "document_id"
-                ]
-            ),
-
-            chunk_index=(
-                chunk_index
-            ),
-
+            document_id=document["document_id"],
+            chunk_index=chunk_index,
             page=page,
-
             section=section,
-
             text=text,
         ),
-
-
-        document_id=(
-            document[
-                "document_id"
-            ]
-        ),
-
-
-        manifest_document_id=str(
-
-            metadata.get(
-                "manifest_document_id"
-            )
-            or ""
-        ),
-
-
-        chunk_index=(
-            chunk_index
-        ),
-
-
+        document_id=document["document_id"],
         text=text,
-
-
-        title=str(
-
-            document.get(
-                "title"
-            )
-
-            or document.get(
-                "source_name"
-            )
-
-            or "untitled"
-        ),
-
-
-        section=section,
-
-        page=page,
-
-
-        source_name=str(
-
-            document.get(
-                "source_name"
-            )
-            or ""
-        ),
-
-
-        source_format=str(
-
-            document.get(
-                "source_format"
-            )
-            or "unknown"
-        ),
-
-
-        language=str(
-
-            document.get(
-                "language"
-            )
-            or "unknown"
-        ),
-
-
-        equipment_type=(
-            document.get(
-                "equipment_type"
-            )
-        ),
-
-
-        equipment_model=(
-            document.get(
-                "equipment_model"
-            )
-        ),
-
-
-        fault_type=(
-            metadata.get(
-                "fault_type"
-            )
-        ),
-
-
-        source=(
-            metadata.get(
-                "source"
-            )
-        ),
-
-
-        source_url=(
-            metadata.get(
-                "source_url"
-            )
-        ),
-
-
-        document_type=(
-            metadata.get(
-                "document_type"
-            )
-        ),
-
-
-        knowledge_scope=(
-            metadata.get(
-                "knowledge_scope"
-            )
-        ),
-
-
-        authority_level=(
-            metadata.get(
-                "authority_label"
-            )
-        ),
-
-
-        relative_path=(
-            metadata.get(
-                "relative_path"
-            )
-        ),
-
-
-        chunking_strategy=(
-            strategy
-        ),
-
-
-        char_count=len(
-            text
-        ),
-
-
-        estimated_tokens=(
-            estimate_tokens(
-                text
-            )
+        metadata=ChunkMetadata(
+            title=document.get("title") or document.get("source_name") or "untitled",
+            source_type=document.get("source_type", "other"),
+            source_uri=document.get("source_uri"),
+            equipment_type=document.get("equipment_type"),
+            authority_level=document.get("authority_level", 3),
+            page=page,
+            section=section,
+            source_name=document.get("source_name") or "untitled",
+            source_format=document.get("source_format", "unknown"),
+            language=document.get("language") or "unknown",
+            equipment_model=document.get("equipment_model"),
+            revision=document.get("revision"),
+            manifest_document_id=metadata.get("manifest_document_id") or "",
+            chunk_index=chunk_index,
+            source=metadata.get("source"),
+            source_url=metadata.get("source_url"),
+            document_type=metadata.get("document_type"),
+            knowledge_scope=metadata.get("knowledge_scope"),
+            authority_label=metadata.get("authority_label"),
+            relative_path=metadata.get("relative_path"),
+            fault_type=metadata.get("fault_type"),
+            chunking_strategy=strategy,
+            char_count=len(text),
+            estimated_tokens=estimate_tokens(text),
         ),
     )
 
@@ -1923,7 +1699,7 @@ def run_chunking(
 
         token_sizes = [
 
-            chunk.estimated_tokens
+            chunk.metadata.estimated_tokens
 
             for chunk
             in document_chunks

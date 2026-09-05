@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.rag.source_scanner import (
-    scan_source_directory,
+    scan_sources,
 )
 
 
@@ -61,16 +61,14 @@ def test_source_scanner_ignores_web_resources(
     # ------------------------------------
 
     records = (
-        scan_source_directory(
+        scan_sources(
             tmp_path
         )
     )
 
 
     names = {
-        record[
-            "source_name"
-        ]
+        record.relative_path
         for record in records
     }
 
